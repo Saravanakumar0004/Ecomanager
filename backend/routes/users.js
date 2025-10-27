@@ -42,7 +42,10 @@ router.get('/profile', authenticate, async (req, res) => {
 
     const [reportCount, completedTraining] = await Promise.all([
       WasteReport.countDocuments({ reporter: user._id }),
-      TrainingProgress.countDocuments({ user: user._id, isCompleted: true })
+      TrainingProgress.countDocuments({ 
+        user: user._id, 
+        'trainingData.isCompleted': true 
+      })
     ]);
 
     res.json({
@@ -82,6 +85,12 @@ router.put('/profile', authenticate, upload.single('avatar'), async (req, res) =
       // For production, use Cloudinary, AWS S3, or Vercel Blob Storage
       const base64Image = req.file.buffer.toString('base64');
       const dataUrl = `data:${req.file.mimetype};base64,${base64Image}`;
+      
+      // Initialize profile object if it doesn't exist
+      if (!user.profile) {
+        user.profile = {};
+      }
+      
       user.profile.avatar = dataUrl;
       
       // TODO: Replace with actual cloud storage service
@@ -118,7 +127,7 @@ router.get('/leaderboard', authenticate, async (req, res) => {
 
     const userRank = await User.countDocuments({
       isActive: true,
-      'rewards.totalEarned': { $gt: req.user.rewards.totalEarned }
+      'rewards.totalEarned': { $gt: req.user.rewards?.totalEarned || 0 }
     }) + 1;
 
     res.json({
@@ -127,11 +136,11 @@ router.get('/leaderboard', authenticate, async (req, res) => {
         leaderboard: leaderboard.map((u, index) => ({
           rank: index + 1,
           name: u.name,
-          points: u.rewards.totalEarned,
-          level: u.rewards.level
+          points: u.rewards?.totalEarned || 0,
+          level: u.rewards?.level || 1
         })),
         userRank,
-        userPoints: req.user.rewards.totalEarned
+        userPoints: req.user.rewards?.totalEarned || 0
       }
     });
   } catch (error) {
