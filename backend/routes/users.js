@@ -1,7 +1,6 @@
 import express from 'express';
 import multer from 'multer';
 import path from 'path';
-import fs from 'fs';
 import User from '../models/User.js';
 import WasteReport from '../models/WasteReport.js';
 import { TrainingProgress } from '../models/Training.js';
@@ -9,20 +8,9 @@ import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// ✅ Ensure upload folder exists
-const uploadDir = 'uploads/avatars';
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-// ✅ Multer setup
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `${req.user._id}-${Date.now()}${ext}`);
-  }
-});
+// ✅ Use memory storage for Vercel (read-only filesystem)
+// For production, you should use Cloudinary, S3, or Vercel Blob Storage
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage,
@@ -88,13 +76,18 @@ router.put('/profile', authenticate, upload.single('avatar'), async (req, res) =
     if (profile) user.profile = { ...user.profile, ...safeParse(profile) };
     if (preferences) user.preferences = { ...user.preferences, ...safeParse(preferences) };
 
-    // Avatar upload
+    // Avatar upload handling
     if (req.file) {
-      if (user.profile?.avatar) {
-        const oldPath = path.join(process.cwd(), user.profile.avatar);
-        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-      }
-      user.profile.avatar = `/${uploadDir}/${req.file.filename}`;
+      // TEMPORARY: Store as base64 in database (NOT RECOMMENDED for production)
+      // For production, use Cloudinary, AWS S3, or Vercel Blob Storage
+      const base64Image = req.file.buffer.toString('base64');
+      const dataUrl = `data:${req.file.mimetype};base64,${base64Image}`;
+      user.profile.avatar = dataUrl;
+      
+      // TODO: Replace with actual cloud storage service
+      // Example with Cloudinary:
+      // const result = await cloudinary.uploader.upload(dataUrl);
+      // user.profile.avatar = result.secure_url;
     }
 
     await user.save();
