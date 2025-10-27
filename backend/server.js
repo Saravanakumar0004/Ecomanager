@@ -26,7 +26,9 @@ const PORT = process.env.PORT || 5000;
 app.use(helmet());
 app.use(
   cors({
-    origin: process.env.NODE_ENV === 'production' ? false : 'http://localhost:5173',
+    origin: process.env.NODE_ENV === 'production' 
+      ? ['https://ecomanager-gamma.vercel.app', 'https://your-frontend-domain.vercel.app']
+      : 'http://localhost:5173',
     credentials: true,
   })
 );
@@ -47,18 +49,49 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // ✅ MongoDB Connection
-mongoose
-  .connect(process.env.MONGODB_URI)
-  .then(() => console.log('✅ MongoDB connected'))
-  .catch((err) => console.error('❌ MongoDB error:', err));
+let isConnected = false;
 
-// ✅ Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/waste', wasteRoutes);
-app.use('/api/training', trainingRoutes);
-app.use('/api/facilities', facilityRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/users', userRoutes);
+const connectDB = async () => {
+  if (isConnected) {
+    return;
+  }
+  try {
+    await mongoose.connect(process.env.MONGODB_URI);
+    isConnected = true;
+    console.log('✅ MongoDB connected');
+  } catch (err) {
+    console.error('❌ MongoDB error:', err);
+    throw err;
+  }
+};
+
+// Connect to DB before handling requests
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Database connection failed' });
+  }
+});
+
+// ✅ Root Route - THIS IS IMPORTANT!
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'EcoManager API is running',
+    version: '1.0.0',
+    endpoints: {
+      health: '/api/health',
+      auth: '/api/auth',
+      waste: '/api/waste',
+      training: '/api/training',
+      facilities: '/api/facilities',
+      admin: '/api/admin',
+      users: '/api/users',
+    }
+  });
+});
 
 // ✅ Health Check
 app.get('/api/health', (req, res) => {
@@ -66,6 +99,24 @@ app.get('/api/health', (req, res) => {
     status: 'OK',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV,
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+  });
+});
+
+// ✅ API Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/waste', wasteRoutes);
+app.use('/api/training', trainingRoutes);
+app.use('/api/facilities', facilityRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/users', userRoutes);
+
+// ✅ 404 Handler - Place this AFTER all other routes
+app.use((req, res) => {
+  res.status(404).json({ 
+    success: false,
+    message: 'Route not found',
+    path: req.path
   });
 });
 
@@ -78,16 +129,13 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Place this AFTER all your other routes
-app.use((req, res) => {
-  res.status(404).json({ 
-    success: false,
-    message: 'Route not found' 
+// ✅ For local development
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
   });
-});
+}
 
-// ✅ Start Server
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
-});
+// ✅ Export for Vercel (CRITICAL!)
+export default app;
