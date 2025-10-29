@@ -2,12 +2,30 @@ import mongoose from 'mongoose';
 
 const connectDB = async () => {
   try {
-    // Updated options - removed all deprecated options
+    // Set mongoose options to handle your specific issues
     const options = {
+      // Disable deprecated warnings
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      
+      // Connection pool settings
       maxPoolSize: 10, // Maintain up to 10 socket connections
-      minPoolSize: 2,  // Minimum connections for better performance
       serverSelectionTimeoutMS: 5000, // Keep trying to send operations for 5 seconds
       socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
+      
+      // Important: This prevents the transaction error you're seeing
+      // By explicitly setting this to false for standalone MongoDB
+      useCreateIndex: true,
+      useFindAndModify: false,
+      
+      // Buffer settings
+      bufferMaxEntries: 0, // Disable mongoose buffering
+      bufferCommands: false, // Disable mongoose buffering
+      
+      // Auto-reconnect settings
+      autoReconnect: true,
+      reconnectTries: 5,
+      reconnectInterval: 500,
     };
 
     // Connect with explicit options
