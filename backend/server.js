@@ -4,8 +4,6 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
 
 // Routes
 import authRoutes from './routes/auth.js';
@@ -16,22 +14,23 @@ import adminRoutes from './routes/admin.js';
 import userRoutes from './routes/users.js';
 
 dotenv.config();
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 5000;
 
-// ✅ Security
-app.use(helmet());
+// ✅ CORS Configuration
 app.use(
   cors({
     origin: process.env.NODE_ENV === 'production' 
-      ? ['https://ecomanager-two.vercel.app', 'https://ecomanager-gamma.vercel.app']
+      ? ['https://ecomanager-two.vercel.app', 'https://ecomanager-gamma.vercel.app', 'https://ecomanager-kappa.vercel.app']
       : 'http://localhost:5173',
     credentials: true,
   })
 );
+
+// ✅ Security
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 
 // ✅ Rate Limiter
 const limiter = rateLimit({
@@ -45,44 +44,47 @@ app.use('/api', limiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ✅ Serve uploads (only for local development - Vercel needs cloud storage)
-if (process.env.NODE_ENV !== 'production') {
-  app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
-}
-
-// ✅ MongoDB Connection with better error handling
-let isConnected = false;
+// ✅ MongoDB Connection (Optimized for Serverless)
+let cachedDb = null;
 
 const connectDB = async () => {
-  if (isConnected && mongoose.connection.readyState === 1) {
-    return;
+  if (cachedDb && mongoose.connection.readyState === 1) {
+    console.log('📊 Using cached MongoDB connection');
+    return cachedDb;
   }
   
   try {
-    if (mongoose.connection.readyState === 0) {
-      await mongoose.connect(process.env.MONGODB_URI, {
-        serverSelectionTimeoutMS: 5000,
-        socketTimeoutMS: 45000,
-      });
+    const options = {
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+      maxPoolSize: 10,
+      minPoolSize: 2,
+    };
+
+    if (!process.env.MONGODB_URI) {
+      throw new Error('MONGODB_URI is not defined in environment variables');
     }
-    isConnected = true;
+
+    const conn = await mongoose.connect(process.env.MONGODB_URI, options);
+    cachedDb = conn;
     console.log('✅ MongoDB connected successfully');
+    return conn;
   } catch (err) {
     console.error('❌ MongoDB connection error:', err.message);
-    isConnected = false;
     throw err;
   }
 };
 
-// Connect to DB before handling requests (for serverless)
+// ✅ Middleware to ensure DB connection before requests
 app.use(async (req, res, next) => {
   try {
     await connectDB();
     next();
   } catch (error) {
-    res.status(500).json({ 
+    console.error('Database connection failed:', error);
+    res.status(503).json({ 
       success: false, 
-      message: 'Database connection failed',
+      message: 'Service temporarily unavailable - Database connection failed',
       error: process.env.NODE_ENV !== 'production' ? error.message : undefined
     });
   }
@@ -139,7 +141,7 @@ app.use('/api/facilities', facilityRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/users', userRoutes);
 
-// ✅ 404 Handler - Place this AFTER all other routes
+// ✅ 404 Handler
 app.use((req, res) => {
   res.status(404).json({ 
     success: false,
@@ -154,7 +156,6 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   console.error('Error:', err.stack);
   
-  // Handle specific error types
   if (err.name === 'ValidationError') {
     return res.status(400).json({
       success: false,
@@ -186,14 +187,13 @@ app.use((err, req, res, next) => {
   });
 });
 
-// ✅ Start server for local development
+// ✅ Local Development Server
+const PORT = process.env.PORT || 5000;
+
 if (process.env.NODE_ENV !== 'production') {
   const startServer = async () => {
     try {
-      // Connect to MongoDB first
       await connectDB();
-      
-      // Then start the server
       app.listen(PORT, () => {
         console.log('═══════════════════════════════════════');
         console.log('🚀 Server started successfully!');
@@ -201,13 +201,6 @@ if (process.env.NODE_ENV !== 'production') {
         console.log(`📡 Server URL: http://localhost:${PORT}`);
         console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
         console.log(`💾 Database: Connected`);
-        console.log(`⏰ Started at: ${new Date().toLocaleString()}`);
-        console.log('═══════════════════════════════════════');
-        console.log('Available endpoints:');
-        console.log(`  GET  http://localhost:${PORT}/`);
-        console.log(`  GET  http://localhost:${PORT}/api/health`);
-        console.log(`  POST http://localhost:${PORT}/api/auth/register`);
-        console.log(`  POST http://localhost:${PORT}/api/auth/login`);
         console.log('═══════════════════════════════════════');
       });
     } catch (error) {
@@ -215,34 +208,8 @@ if (process.env.NODE_ENV !== 'production') {
       process.exit(1);
     }
   };
-
   startServer();
 }
 
-// ✅ Graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('\n🛑 Shutting down gracefully...');
-  try {
-    await mongoose.connection.close();
-    console.log('✅ MongoDB connection closed');
-    process.exit(0);
-  } catch (err) {
-    console.error('❌ Error during shutdown:', err);
-    process.exit(1);
-  }
-});
-
-process.on('SIGTERM', async () => {
-  console.log('\n🛑 SIGTERM received, shutting down...');
-  try {
-    await mongoose.connection.close();
-    console.log('✅ MongoDB connection closed');
-    process.exit(0);
-  } catch (err) {
-    console.error('❌ Error during shutdown:', err);
-    process.exit(1);
-  }
-});
-
-// ✅ Export for Vercel (CRITICAL!)
+// ✅ CRITICAL: Export for Vercel
 export default app;
