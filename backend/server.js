@@ -211,5 +211,5 @@ if (process.env.NODE_ENV !== 'production') {
   startServer();
 }
 
-// ✅ CRITICAL: Export for Vercel
+
 export default app;
