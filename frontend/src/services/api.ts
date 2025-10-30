@@ -1,14 +1,26 @@
 import axios from 'axios';
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+// Remove trailing slash and ensure /api is added
+const getBaseURL = () => {
+  const envURL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+  // Remove trailing slash if present
+  const cleanURL = envURL.replace(/\/$/, '');
+  // Add /api if not already present
+  return cleanURL.endsWith('/api') ? cleanURL : `${cleanURL}/api`;
+};
+
+const BASE_URL = getBaseURL();
+
+console.log('API Base URL:', BASE_URL); // Debug log
 
 // Create axios instance
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 10000,
+  timeout: 30000, // Increased timeout for serverless cold starts
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true, // Important for CORS
 });
 
 // Request interceptor to add JWT auth token if present
@@ -21,15 +33,30 @@ api.interceptors.request.use(
       config.headers = config.headers || {};
       config.headers['Authorization'] = `Bearer ${token}`;
     }
+    
+    console.log('Request:', config.method?.toUpperCase(), config.url); // Debug log
     return config;
   },
-  (error) => Promise.reject(error)
+  (error) => {
+    console.error('Request Error:', error);
+    return Promise.reject(error);
+  }
 );
 
 // Response interceptor to handle token refresh on 401 errors
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    console.log('Response:', response.status, response.config.url); // Debug log
+    return response;
+  },
   async (error) => {
+    console.error('Response Error:', {
+      status: error.response?.status,
+      url: error.config?.url,
+      message: error.message,
+      data: error.response?.data
+    });
+
     const originalRequest = error.config;
 
     if (error.response?.status === 401 && !originalRequest._retry) {
