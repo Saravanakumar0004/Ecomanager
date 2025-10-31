@@ -17,26 +17,35 @@ dotenv.config();
 
 const app = express();
 
-// ✅ CORS Configuration
+// ✅ CORS Configuration - Updated with new domain
 app.use(
   cors({
     origin: process.env.NODE_ENV === 'production' 
-      ? ['https://ecomanager-two.vercel.app', 'https://ecomanager-gamma.vercel.app', 'https://ecomanager-kappa.vercel.app']
+      ? [
+          'https://ecomanager-two.vercel.app',
+          'https://ecomanager-gamma.vercel.app',
+          'https://ecomanager-kappa.vercel.app',
+          'https://ecomanager-oigp.vercel.app', // Added new domain
+          /^https:\/\/ecomanager-.*\.vercel\.app$/ // Pattern for all deployment previews
+        ]
       : 'http://localhost:5173',
     credentials: true,
   })
 );
 
-// ✅ Security
+// ✅ Security - Updated for Vercel
 app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  contentSecurityPolicy: false // Disable for API
 }));
 
-// ✅ Rate Limiter
+// ✅ Rate Limiter - More lenient for production
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: process.env.NODE_ENV === 'production' ? 200 : 100,
   message: 'Too many requests, try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 app.use('/api', limiter);
 
@@ -55,10 +64,12 @@ const connectDB = async () => {
   
   try {
     const options = {
-      serverSelectionTimeoutMS: 5000,
+      serverSelectionTimeoutMS: 10000, // Increased timeout
       socketTimeoutMS: 45000,
       maxPoolSize: 10,
       minPoolSize: 2,
+      retryWrites: true,
+      retryReads: true,
     };
 
     if (!process.env.MONGODB_URI) {
@@ -90,7 +101,7 @@ app.use(async (req, res, next) => {
   }
 });
 
-// ✅ Root Route
+// ✅ Root Route - PUBLIC (no auth required)
 app.get('/', (req, res) => {
   res.json({
     success: true,
@@ -98,6 +109,7 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
+    status: 'online',
     endpoints: {
       health: '/api/health',
       auth: '/api/auth',
@@ -110,7 +122,7 @@ app.get('/', (req, res) => {
   });
 });
 
-// ✅ Health Check
+// ✅ Health Check - PUBLIC
 app.get('/api/health', (req, res) => {
   const dbState = mongoose.connection.readyState;
   const dbStatus = {
@@ -130,6 +142,7 @@ app.get('/api/health', (req, res) => {
       readyState: dbState
     },
     uptime: process.uptime(),
+    memory: process.memoryUsage(),
   });
 });
 
@@ -148,7 +161,16 @@ app.use((req, res) => {
     message: 'Route not found',
     path: req.path,
     method: req.method,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    availableEndpoints: [
+      'GET /',
+      'GET /api/health',
+      'POST /api/auth/login',
+      'POST /api/auth/register',
+      'GET /api/facilities',
+      'GET /api/waste/reports',
+      'GET /api/training/modules'
+    ]
   });
 });
 
@@ -156,6 +178,7 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   console.error('Error:', err.stack);
   
+  // Handle specific error types
   if (err.name === 'ValidationError') {
     return res.status(400).json({
       success: false,
@@ -178,6 +201,15 @@ app.use((err, req, res, next) => {
     });
   }
 
+  if (err.name === 'MulterError') {
+    return res.status(400).json({
+      success: false,
+      message: 'File upload error',
+      error: err.message
+    });
+  }
+
+  // Generic error response
   res.status(err.status || 500).json({
     success: false,
     message: process.env.NODE_ENV === 'production' 
@@ -195,13 +227,13 @@ if (process.env.NODE_ENV !== 'production') {
     try {
       await connectDB();
       app.listen(PORT, () => {
-        console.log('═══════════════════════════════════════');
+        console.log('╔═══════════════════════════════════╗');
         console.log('🚀 Server started successfully!');
-        console.log('═══════════════════════════════════════');
+        console.log('╚═══════════════════════════════════╝');
         console.log(`📡 Server URL: http://localhost:${PORT}`);
-        console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+        console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
         console.log(`💾 Database: Connected`);
-        console.log('═══════════════════════════════════════');
+        console.log('═══════════════════════════════════');
       });
     } catch (error) {
       console.error('❌ Failed to start server:', error.message);
@@ -211,5 +243,5 @@ if (process.env.NODE_ENV !== 'production') {
   startServer();
 }
 
-
+// ✅ Export for Vercel
 export default app;
