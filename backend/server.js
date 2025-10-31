@@ -17,21 +17,50 @@ dotenv.config();
 
 const app = express();
 
-// ✅ CORS Configuration - Updated with new domain
-app.use(
-  cors({
-    origin: process.env.NODE_ENV === 'production' 
-      ? [
-          'https://ecomanager-two.vercel.app',
-          'https://ecomanager-gamma.vercel.app',
-          'https://ecomanager-kappa.vercel.app',
-          'https://ecomanager-oigp.vercel.app', // Added new domain
-          /^https:\/\/ecomanager-.*\.vercel\.app$/ // Pattern for all deployment previews
-        ]
-      : 'http://localhost:5173',
-    credentials: true,
-  })
-);
+// ========================================================================
+// 🔧 FIX #1: Trust Vercel's proxy - ADD THIS LINE HERE
+// ========================================================================
+app.set('trust proxy', 1);
+
+// ========================================================================
+// 🔧 FIX #2: Enhanced CORS Configuration - REPLACE YOUR EXISTING CORS
+// ========================================================================
+const allowedOrigins = process.env.NODE_ENV === 'production' 
+  ? [
+      'https://ecomanager-two.vercel.app',
+      'https://ecomanager-gamma.vercel.app',
+      'https://ecomanager-kappa.vercel.app',
+      'https://ecomanager-oigp.vercel.app',
+    ]
+  : ['http://localhost:5173', 'http://localhost:3000'];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, Postman, etc.)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is allowed
+    if (allowedOrigins.some(allowed => 
+      origin === allowed || 
+      origin.match(/^https:\/\/ecomanager-.*\.vercel\.app$/)
+    )) {
+      callback(null, true);
+    } else {
+      console.log('Blocked origin:', origin);
+      callback(null, false);
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Length', 'Content-Type'],
+  maxAge: 86400 // 24 hours
+}));
+
+// ========================================================================
+// 🔧 FIX #3: Handle preflight for all routes - ADD THIS LINE HERE
+// ========================================================================
+app.options('*', cors());
 
 // ✅ Security - Updated for Vercel
 app.use(helmet({
@@ -39,14 +68,27 @@ app.use(helmet({
   contentSecurityPolicy: false // Disable for API
 }));
 
-// ✅ Rate Limiter - More lenient for production
+// ========================================================================
+// 🔧 FIX #4: Rate Limiter with custom keyGenerator - REPLACE YOUR EXISTING RATE LIMITER
+// ========================================================================
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: process.env.NODE_ENV === 'production' ? 200 : 100,
   message: 'Too many requests, try again later.',
   standardHeaders: true,
   legacyHeaders: false,
+  // 🎯 CRITICAL FIX: Custom key generator for Vercel
+  keyGenerator: (req) => {
+    // Use X-Forwarded-For or X-Real-IP from Vercel's proxy
+    return req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
+           req.headers['x-real-ip'] || 
+           req.ip || 
+           'unknown';
+  },
+  // Skip rate limiting for health checks
+  skip: (req) => req.path === '/api/health' || req.path === '/'
 });
+
 app.use('/api', limiter);
 
 // ✅ Body Parsing
@@ -64,7 +106,7 @@ const connectDB = async () => {
   
   try {
     const options = {
-      serverSelectionTimeoutMS: 10000, // Increased timeout
+      serverSelectionTimeoutMS: 10000,
       socketTimeoutMS: 45000,
       maxPoolSize: 10,
       minPoolSize: 2,
@@ -231,7 +273,7 @@ if (process.env.NODE_ENV !== 'production') {
         console.log('🚀 Server started successfully!');
         console.log('╚═══════════════════════════════════╝');
         console.log(`📡 Server URL: http://localhost:${PORT}`);
-        console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+        console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
         console.log(`💾 Database: Connected`);
         console.log('═══════════════════════════════════');
       });
