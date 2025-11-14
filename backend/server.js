@@ -7,6 +7,8 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+
+
 // Routes
 import authRoutes from './routes/auth.js';
 import wasteRoutes from './routes/waste.js';
